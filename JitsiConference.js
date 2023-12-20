@@ -2154,13 +2154,21 @@ JitsiConference.prototype._onIncomingCallP2P = function(jingleSession, jingleOff
 /**
  * Handles an incoming call event.
  */
-JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, now) {
+JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, now, retry) {
     // Handle incoming P2P call
     if (jingleSession.isP2P) {
         this._onIncomingCallP2P(jingleSession, jingleOffer);
     } else {
         if (!this.isFocus(jingleSession.remoteJid)) {
-            const description = 'Rejecting session-initiate from non-focus.';
+            if (!retry) {
+                setTimeout(() => {
+                    // 可能是時序問題，導致 isFocus 判斷錯誤
+                    this.onIncomingCall(jingleSession, jingleOffer, now, true);
+                }, 1000);
+
+                return;
+            }
+            const description = `Rejecting session-initiate from non-focus(${jingleSession.remoteJid}).`;
 
             this._rejectIncomingCall(
                 jingleSession, {
