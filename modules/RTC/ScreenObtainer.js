@@ -157,13 +157,13 @@ const ScreenObtainer = {
                                 for (let i = 0; i < devices.length; i++) {
                                     const device = devices[i];
 
-                                    if (device.kind === 'audiooutput' && device.label.includes('SoundPusher')) {
-                                        logger.info('SoundPusher audio found, get the stream');
+                                    if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
+                                        logger.info('vitual audio found, get the stream');
 
                                         return navigator.mediaDevices.getUserMedia({
                                             audio: {
                                                 deviceId: {
-                                                    exact: device.id
+                                                    exact: device.deviceId
                                                 }
                                             },
                                             sampleRate: 48000,
@@ -173,13 +173,14 @@ const ScreenObtainer = {
                                         });
                                     }
                                 }
-                                logger.warn('SoundPusher virtual audio lost, no audio with the screen')
+                                logger.warn('virtual audio lost, no audio with the screen');
 
                                 return null;
                             })
                             .then(audioSource => {
                                 navigator.mediaDevices.getUserMedia(constraints)
                                 .then(stream => {
+                                    console.info('the stream origin audio tracks:', stream.getAudioTracks());
                                     if (audioSource) {
                                         logger.info('combine audio and video source');
                                         audioSource.getAudioTracks().forEach(track => {
