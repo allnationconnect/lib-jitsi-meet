@@ -2160,11 +2160,11 @@ JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, 
         this._onIncomingCallP2P(jingleSession, jingleOffer);
     } else {
         if (!this.isFocus(jingleSession.remoteJid)) {
-            if (!retry) {
+            if (!retry || retry < 10) {
                 setTimeout(() => {
                     // 可能是時序問題，導致 isFocus 判斷錯誤
-                    this.onIncomingCall(jingleSession, jingleOffer, now, true);
-                }, 1000);
+                    this.onIncomingCall(jingleSession, jingleOffer, now, (retry || 0) + 1);
+                }, 100);
 
                 return;
             }
