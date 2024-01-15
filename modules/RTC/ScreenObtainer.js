@@ -169,7 +169,7 @@ const ScreenObtainer = {
                                             sampleRate: 48000,
                                             echoCancellation: false,
                                             noiseSuppression: false,
-                                            autoGainControl: false
+                                            autoGainControl: true
                                         });
                                     }
                                 }
