@@ -2155,14 +2155,24 @@ JitsiConference.prototype._onIncomingCallP2P = function(jingleSession, jingleOff
 /**
  * Handles an incoming call event.
  */
-JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, now) {
+JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, now, retry) {
     // Handle incoming P2P call
     if (jingleSession.isP2P) {
-        this._onIncomingCallP2P(jingleSession, jingleOffer);
+        this._onIncomingCallP2P(jingleSession, jingleOffer);    
     } else {
         if (!this.isFocus(jingleSession.remoteJid)) {
-            const description = 'Rejecting session-initiate from non-focus.';
+            logger.info(`Got incoming call(no p2p), try ${retry || 0} time`);
+            if (!retry || retry < 10) {
+                setTimeout(() => {
+                    // 可能是時序問題，導致 isFocus 判斷錯誤
+                    this.onIncomingCall(jingleSession, jingleOffer, now, (retry || 0) + 1);
+                }, 1000);
 
+                return;
+            }
+            const description = `Rejecting session-initiate from non-focus(${jingleSession.remoteJid}).`;
+
+            logger.error(description);
             this._rejectIncomingCall(
                 jingleSession, {
                     reason: 'security-error',
@@ -2172,6 +2182,7 @@ JitsiConference.prototype.onIncomingCall = function(jingleSession, jingleOffer, 
 
             return;
         }
+        logger.info('Got incoming call(no p2p), accept');
         this._acceptJvbIncomingCall(jingleSession, jingleOffer, now);
     }
 };

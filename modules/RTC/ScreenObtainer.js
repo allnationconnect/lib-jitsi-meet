@@ -92,6 +92,8 @@ const ScreenObtainer = {
      * @param {Object} options - Optional parameters.
      */
     obtainScreenOnElectron(onSuccess, onFailure, options = {}) {
+        const self = this;
+
         if (window.JitsiMeetScreenObtainer && window.JitsiMeetScreenObtainer.openDesktopPicker) {
             const { desktopSharingFrameRate, desktopSharingResolution, desktopSharingSources } = this.options;
 
@@ -101,10 +103,14 @@ const ScreenObtainer = {
                         options.desktopSharingSources || desktopSharingSources || [ 'screen', 'window' ]
                 },
                 (streamId, streamType, screenShareAudio = false) => {
+                    const isOSX = browser.getOS().toLowerCase() === 'mac os';
+
+                    logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
                     if (streamId) {
                         let audioConstraints = false;
 
-                        if (screenShareAudio) {
+                        if (screenShareAudio || isOSX) {
+                            // win选择共享audio || osx没选择按钮，强制共享audio
                             audioConstraints = {};
                             const optionalConstraints = this._getAudioConstraints();
 
@@ -143,17 +149,67 @@ const ScreenObtainer = {
                             }
                         };
 
-                        // We have to use the old API on Electron to get a desktop stream.
-                        navigator.mediaDevices.getUserMedia(constraints)
-                            .then(stream => {
-                                this.setContentHint(stream);
-                                onSuccess({
-                                    stream,
-                                    sourceId: streamId,
-                                    sourceType: streamType
+                        if (isOSX) {
+                            // both screen and window will add audio track
+                            navigator.mediaDevices.enumerateDevices().then(devices => {
+                                logger.debug('get devices count:', devices.length);
+                                for (let i = 0; i < devices.length; i++) {
+                                    const device = devices[i];
+
+                                    if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
+                                        logger.info('vitual audio found, get the stream');
+
+                                        return navigator.mediaDevices.getUserMedia({
+                                            audio: {
+                                                deviceId: {
+                                                    exact: device.deviceId
+                                                }
+                                            },
+                                            sampleRate: 48000,
+                                            echoCancellation: false,
+                                            noiseSuppression: false,
+                                            autoGainControl: true
+                                        });
+                                    }
+                                }
+                                logger.warn('virtual audio lost, no audio with the screen');
+
+                                return null;
+                            })
+                            .then(audioSource => {
+                                navigator.mediaDevices.getUserMedia(constraints)
+                                .then(stream => {
+                                    console.info('the stream origin audio tracks:', stream.getAudioTracks());
+                                    if (audioSource) {
+                                        logger.info('combine audio and video source');
+                                        audioSource.getAudioTracks().forEach(track => {
+                                            stream.addTrack(track);
+                                        });
+                                    }
+                                    self.setContentHint(stream);
+                                    onSuccess({
+                                        stream,
+                                        sourceId: streamId,
+                                        sourceType: streamType
+                                    });
                                 });
                             })
                             .catch(err => onFailure(err));
+
+                        } else {
+                            // We have to use the old API on Electron to get a desktop stream.
+                            navigator.mediaDevices.getUserMedia(constraints)
+                                .then(stream => {
+                                    self.setContentHint(stream);
+                                    onSuccess({
+                                        stream,
+                                        sourceId: streamId,
+                                        sourceType: streamType
+                                    });
+                                })
+                                .catch(err => onFailure(err));
+                        }
+
                     } else {
                         // As noted in Chrome Desktop Capture API:
                         // If user didn't select any source (i.e. canceled the prompt)
