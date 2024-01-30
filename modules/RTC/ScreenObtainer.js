@@ -103,14 +103,12 @@ const ScreenObtainer = {
                         options.desktopSharingSources || desktopSharingSources || [ 'screen', 'window' ]
                 },
                 (streamId, streamType, screenShareAudio = false) => {
-                    const isOSX = browser.getOS().toLowerCase() === 'mac os';
 
-                    logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
+                    logger.info(`current system is ${browser.getOS()}`);
                     if (streamId) {
                         let audioConstraints = false;
 
-                        if (screenShareAudio || isOSX) {
-                            // win选择共享audio || osx没选择按钮，强制共享audio
+                        if (screenShareAudio) {
                             audioConstraints = {};
                             const optionalConstraints = this._getAudioConstraints();
 
