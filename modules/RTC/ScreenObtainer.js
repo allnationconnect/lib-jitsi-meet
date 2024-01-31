@@ -103,36 +103,12 @@ const ScreenObtainer = {
                         options.desktopSharingSources || desktopSharingSources || [ 'screen', 'window' ]
                 },
                 (streamId, streamType, screenShareAudio = false) => {
+                    const isOSX = browser.getOS().toLowerCase() === 'mac os';
 
-                    logger.info(`current system is ${browser.getOS()}`);
+                    logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
                     if (streamId) {
-                        let audioConstraints = false;
-
-                        if (screenShareAudio) {
-                            audioConstraints = {};
-                            const optionalConstraints = this._getAudioConstraints();
-
-                            if (typeof optionalConstraints !== 'boolean') {
-                                audioConstraints = {
-                                    optional: optionalConstraints
-                                };
-                            }
-
-                            // Audio screen sharing for electron only works for screen type devices.
-                            // i.e. when the user shares the whole desktop.
-                            // Note. The documentation specifies that chromeMediaSourceId should not be present
-                            // which, in the case a users has multiple monitors, leads to them being shared all
-                            // at once. However we tested with chromeMediaSourceId present and it seems to be
-                            // working properly.
-                            if (streamType === 'screen') {
-                                audioConstraints.mandatory = {
-                                    chromeMediaSource: 'desktop'
-                                };
-                            }
-                        }
-
-                        const constraints = {
-                            audio: audioConstraints,
+                        const videoConstraints = {
+                            audio: false,
                             video: {
                                 mandatory: {
                                     chromeMediaSource: 'desktop',
@@ -147,67 +123,77 @@ const ScreenObtainer = {
                             }
                         };
 
-                        if (isOSX) {
-                            // both screen and window will add audio track
-                            navigator.mediaDevices.enumerateDevices().then(devices => {
-                                logger.debug('get devices count:', devices.length);
-                                for (let i = 0; i < devices.length; i++) {
-                                    const device = devices[i];
-
-                                    if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
-                                        logger.info('vitual audio found, get the stream');
-
-                                        return navigator.mediaDevices.getUserMedia({
-                                            audio: {
-                                                deviceId: {
-                                                    exact: device.deviceId
-                                                }
-                                            },
-                                            sampleRate: 48000,
-                                            echoCancellation: false,
-                                            noiseSuppression: false,
-                                            autoGainControl: true
-                                        });
-                                    }
+                        new Promise((resolve, reject) => {
+                            navigator.mediaDevices.getUserMedia(videoConstraints).then(videoStream => {
+                                if (!screenShareAudio) {
+                                    resolve(videoStream, null);
                                 }
-                                logger.warn('virtual audio lost, no audio with the screen');
+                                if (isOSX) {
+                                    navigator.mediaDevices.enumerateDevices().then(devices => {
+                                        logger.debug('get devices count:', devices.length);
+                                        for (let i = 0; i < devices.length; i++) {
+                                            const device = devices[i];
 
-                                return null;
-                            })
-                            .then(audioSource => {
-                                navigator.mediaDevices.getUserMedia(constraints)
-                                .then(stream => {
-                                    console.info('the stream origin audio tracks:', stream.getAudioTracks());
-                                    if (audioSource) {
-                                        logger.info('combine audio and video source');
-                                        audioSource.getAudioTracks().forEach(track => {
-                                            stream.addTrack(track);
-                                        });
-                                    }
-                                    self.setContentHint(stream);
-                                    onSuccess({
-                                        stream,
-                                        sourceId: streamId,
-                                        sourceType: streamType
+                                            if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
+                                                logger.info('vitual audio found, get the stream');
+
+                                                return navigator.mediaDevices.getUserMedia({
+                                                    audio: {
+                                                        deviceId: {
+                                                            exact: device.deviceId
+                                                        },
+                                                        sampleRate: 48000,
+                                                        echoCancellation: true,
+                                                        noiseSuppression: true,
+                                                        autoGainControl: true
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        logger.warn('virtual audio lost, no audio with the screen');
+
+                                        return null;
+
+                                    })
+                                    .then(audioStream => {
+                                        resolve(videoStream, audioStream);
+                                    })
+                                    .catch(() => {
+                                        resolve(videoStream, null);
                                     });
+                                } else {
+                                    navigator.mediaDevices.getUserMedia({
+                                        audio: {
+                                            mandatory: {
+                                                chromeMediaSource: 'desktop'
+                                            }
+                                        }
+                                    })
+                                    .then(audioStream => {
+                                        resolve(videoStream, audioStream);
+                                    })
+                                    .catch(() => {
+                                        resolve(videoStream, null);
+                                    });
+                                }
+                            });
+                        })
+                        .then((videoStream, audioStream) => {
+                            console.info('the stream origin audio tracks:', audioStream.getAudioTracks());
+                            if (audioStream) {
+                                logger.info('combine audio and video source');
+                                audioStream.getAudioTracks().forEach(track => {
+                                    videoStream.addTrack(track);
                                 });
-                            })
-                            .catch(err => onFailure(err));
-
-                        } else {
-                            // We have to use the old API on Electron to get a desktop stream.
-                            navigator.mediaDevices.getUserMedia(constraints)
-                                .then(stream => {
-                                    self.setContentHint(stream);
-                                    onSuccess({
-                                        stream,
-                                        sourceId: streamId,
-                                        sourceType: streamType
-                                    });
-                                })
-                                .catch(err => onFailure(err));
-                        }
-
+                            }
+                            self.setContentHint(videoStream);
+                            onSuccess({
+                                videoStream,
+                                sourceId: streamId,
+                                sourceType: streamType
+                            });
+                        })
+                        .catch(err => onFailure(err));
                     } else {
                         // As noted in Chrome Desktop Capture API:
                         // If user didn't select any source (i.e. canceled the prompt)
