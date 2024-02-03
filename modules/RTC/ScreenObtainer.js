@@ -85,6 +85,67 @@ const ScreenObtainer = {
     },
 
     /**
+     * Get audio stream on Electron.
+     *
+     * @param screenShareAudio.
+     * @return Promise<Object|null>
+     */
+    getAudioStreamOnElectron(screenShareAudio) {
+        return new Promise((resolve, reject) => {
+            if (!screenShareAudio) {
+                resolve(null);
+
+                return;
+            }
+
+            const isOSX = browser.getOS().toLowerCase() === 'mac os';
+
+            logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
+            if (isOSX) {
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                    logger.debug('get devices count:', devices.length);
+                    for (let i = 0; i < devices.length; i++) {
+                        const device = devices[i];
+
+                        if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
+                            logger.info('vitual audio found, get the stream');
+
+                            return navigator.mediaDevices.getUserMedia({
+                                audio: {
+                                    deviceId: {
+                                        exact: device.deviceId
+                                    },
+                                    sampleRate: 48000,
+                                    echoCancellation: true,
+                                    noiseSuppression: true,
+                                    autoGainControl: true
+                                }
+                            });
+                        }
+                    }
+                    logger.warn('virtual audio lost, no audio with the screen');
+                })
+                .then(stream => resolve(stream))
+                .catch(() => resolve(null));
+            } else {
+                return navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        mandatory: {
+                            chromeMediaSource: 'desktop'
+                        }
+                    },
+                    video: {
+                        mandatory: {
+                            chromeMediaSource: 'desktop'
+                        }
+                    }
+                }).then(stream => resolve(stream))
+                .catch(() => resolve(null));
+            }
+        });
+    },
+
+    /**
      * Obtains a screen capture stream on Electron.
      *
      * @param onSuccess - Success callback.
@@ -103,9 +164,7 @@ const ScreenObtainer = {
                         options.desktopSharingSources || desktopSharingSources || [ 'screen', 'window' ]
                 },
                 (streamId, streamType, screenShareAudio = false) => {
-                    const isOSX = browser.getOS().toLowerCase() === 'mac os';
 
-                    logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
                     if (streamId) {
                         const videoConstraints = {
                             audio: false,
@@ -123,77 +182,35 @@ const ScreenObtainer = {
                             }
                         };
 
-                        new Promise((resolve, reject) => {
-                            navigator.mediaDevices.getUserMedia(videoConstraints).then(videoStream => {
-                                if (!screenShareAudio) {
-                                    resolve(videoStream, null);
-                                }
-                                if (isOSX) {
-                                    navigator.mediaDevices.enumerateDevices().then(devices => {
-                                        logger.debug('get devices count:', devices.length);
-                                        for (let i = 0; i < devices.length; i++) {
-                                            const device = devices[i];
+                        Promise.all([
+                            self.getAudioStreamOnElectron(screenShareAudio),
+                            navigator.mediaDevices.getUserMedia(videoConstraints)
+                        ])
+                        .then(([ audioStream, videoStream ]) => {
+                            logger.info('combine audio and video source');
+                            const combinedStream = new MediaStream();
 
-                                            if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
-                                                logger.info('vitual audio found, get the stream');
-
-                                                return navigator.mediaDevices.getUserMedia({
-                                                    audio: {
-                                                        deviceId: {
-                                                            exact: device.deviceId
-                                                        },
-                                                        sampleRate: 48000,
-                                                        echoCancellation: true,
-                                                        noiseSuppression: true,
-                                                        autoGainControl: true
-                                                    }
-                                                });
-                                            }
-                                        }
-                                        logger.warn('virtual audio lost, no audio with the screen');
-
-                                        return null;
-
-                                    })
-                                    .then(audioStream => {
-                                        resolve(videoStream, audioStream);
-                                    })
-                                    .catch(() => {
-                                        resolve(videoStream, null);
-                                    });
-                                } else {
-                                    navigator.mediaDevices.getUserMedia({
-                                        audio: {
-                                            mandatory: {
-                                                chromeMediaSource: 'desktop'
-                                            }
-                                        }
-                                    })
-                                    .then(audioStream => {
-                                        resolve(videoStream, audioStream);
-                                    })
-                                    .catch(() => {
-                                        resolve(videoStream, null);
-                                    });
-                                }
+                            videoStream.getVideoTracks().forEach(track => {
+                                combinedStream.addTrack(track);
                             });
-                        })
-                        .then((videoStream, audioStream) => {
-                            console.info('the stream origin audio tracks:', audioStream.getAudioTracks());
+
                             if (audioStream) {
-                                logger.info('combine audio and video source');
                                 audioStream.getAudioTracks().forEach(track => {
-                                    videoStream.addTrack(track);
+                                    combinedStream.addTrack(track);
                                 });
                             }
-                            self.setContentHint(videoStream);
+
+                            self.setContentHint(combinedStream);
                             onSuccess({
-                                videoStream,
+                                stream: combinedStream,
                                 sourceId: streamId,
                                 sourceType: streamType
                             });
                         })
-                        .catch(err => onFailure(err));
+                        .catch(err => {
+                            onFailure(err);
+                            logger.error(`get stream source failed with error ${err}`);
+                        });
                     } else {
                         // As noted in Chrome Desktop Capture API:
                         // If user didn't select any source (i.e. canceled the prompt)
