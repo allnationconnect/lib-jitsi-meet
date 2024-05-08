@@ -128,18 +128,13 @@ const ScreenObtainer = {
                 .then(stream => resolve(stream))
                 .catch(() => resolve(null));
             } else {
-                return navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop'
-                        }
-                    },
-                    video: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop'
-                        }
-                    }
-                }).then(stream => resolve(stream))
+                navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: true
+                })
+                .then(stream => {
+                    resolve(stream);
+                })
                 .catch(() => resolve(null));
             }
         });
