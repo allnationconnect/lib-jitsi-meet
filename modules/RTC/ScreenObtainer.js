@@ -108,7 +108,7 @@ const ScreenObtainer = {
                         const device = devices[i];
 
                         if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
-                            logger.info('vitual audio found, get the stream');
+                            logger.info('virtual audio found, get the stream');
 
                             return navigator.mediaDevices.getUserMedia({
                                 audio: {
@@ -118,7 +118,7 @@ const ScreenObtainer = {
                                     sampleRate: 48000,
                                     echoCancellation: true,
                                     noiseSuppression: true,
-                                    autoGainControl: true
+                                    autoGainControl: false
                                 }
                             });
                         }
