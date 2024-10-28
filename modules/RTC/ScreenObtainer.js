@@ -102,16 +102,11 @@ const ScreenObtainer = {
 
             logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
             if (isOSX) {
-                if (window.jitsiBridge && window.jitsiBridge.startMacAudioDriver) {
-                    try {
-                        window.jitsiBridge.startMacAudioDriver();
-                    } catch (e) {
-                        logger.error('window.jitsiBridge.startMacAudioDriver error', e);
-                        resolve(null);
-                    }
-                } else {
-                    logger.warn('window.jitsiBridge.startMacAudioDriver not found');
-                    resolve(null);
+                // 补丁，向下调用 APP.API.notifyScreenSharingAudioChanged
+                // 并不是好的方式，只是给jitsi打个补丁的event
+                if (window.APP && window.APP.API && window.APP.API.notifyScreenSharingAudioChanged) {
+                    window.APP.API.notifyScreenSharingAudioChanged(true);
+                    logger.info('window.APP.API.notifyScreenSharingAudioChanged to true');
                 }
 
                 navigator.mediaDevices.enumerateDevices().then(devices => {
