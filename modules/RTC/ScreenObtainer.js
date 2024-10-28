@@ -102,6 +102,18 @@ const ScreenObtainer = {
 
             logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
             if (isOSX) {
+                if (window.jitsiBridge && window.jitsiBridge.startMacAudioDriver) {
+                    try {
+                        window.jitsiBridge.startMacAudioDriver();
+                    } catch (e) {
+                        logger.error('window.jitsiBridge.startMacAudioDriver error', e);
+                        resolve(null);
+                    }
+                } else {
+                    logger.warn('window.jitsiBridge.startMacAudioDriver not found');
+                    resolve(null);
+                }
+
                 navigator.mediaDevices.enumerateDevices().then(devices => {
                     logger.debug('get devices count:', devices.length);
                     for (let i = 0; i < devices.length; i++) {
@@ -159,7 +171,6 @@ const ScreenObtainer = {
                         options.desktopSharingSources || desktopSharingSources || [ 'screen', 'window' ]
                 },
                 (streamId, streamType, screenShareAudio = false) => {
-
                     if (streamId) {
                         const videoConstraints = {
                             audio: false,
