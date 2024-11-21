@@ -85,6 +85,69 @@ const ScreenObtainer = {
     },
 
     /**
+     * Get audio stream on Electron.
+     *
+     * @param screenShareAudio.
+     * @return Promise<Object|null>
+     */
+    getAudioStreamOnElectron(screenShareAudio) {
+        return new Promise((resolve, reject) => {
+            if (!screenShareAudio) {
+                resolve(null);
+
+                return;
+            }
+
+            const isOSX = browser.getOS().toLowerCase() === 'mac os';
+
+            logger.info(`current system is osx?, ${isOSX}, system is ${browser.getOS()}`);
+            if (isOSX) {
+                // 补丁，向下调用 APP.API.notifyScreenSharingAudioChanged
+                // 并不是好的方式，只是给jitsi打个补丁的event
+                if (window.APP && window.APP.API && window.APP.API.notifyScreenSharingAudioChanged) {
+                    window.APP.API.notifyScreenSharingAudioChanged(true);
+                    logger.info('window.APP.API.notifyScreenSharingAudioChanged to true');
+                }
+
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                    logger.debug('get devices count:', devices.length);
+                    for (let i = 0; i < devices.length; i++) {
+                        const device = devices[i];
+
+                        if (device.kind === 'audioinput' && device.label.includes('AncAudio')) {
+                            logger.info('virtual audio found, get the stream');
+
+                            return navigator.mediaDevices.getUserMedia({
+                                audio: {
+                                    deviceId: {
+                                        exact: device.deviceId
+                                    },
+                                    sampleRate: 48000,
+                                    echoCancellation: true,
+                                    noiseSuppression: true,
+                                    autoGainControl: false
+                                }
+                            });
+                        }
+                    }
+                    logger.warn('virtual audio lost, no audio with the screen');
+                })
+                .then(stream => resolve(stream))
+                .catch(() => resolve(null));
+            } else {
+                navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: true
+                })
+                .then(stream => {
+                    resolve(stream);
+                })
+                .catch(() => resolve(null));
+            }
+        });
+    },
+
+    /**
      * Obtains a screen capture stream on Electron.
      *
      * @param onSuccess - Success callback.
@@ -92,6 +155,8 @@ const ScreenObtainer = {
      * @param {Object} options - Optional parameters.
      */
     obtainScreenOnElectron(onSuccess, onFailure, options = {}) {
+        const self = this;
+
         if (window.JitsiMeetScreenObtainer && window.JitsiMeetScreenObtainer.openDesktopPicker) {
             const { desktopSharingFrameRate, desktopSharingResolution, desktopSharingSources } = this.options;
 
@@ -102,33 +167,8 @@ const ScreenObtainer = {
                 },
                 (streamId, streamType, screenShareAudio = false) => {
                     if (streamId) {
-                        let audioConstraints = false;
-
-                        if (screenShareAudio) {
-                            audioConstraints = {};
-                            const optionalConstraints = this._getAudioConstraints();
-
-                            if (typeof optionalConstraints !== 'boolean') {
-                                audioConstraints = {
-                                    optional: optionalConstraints
-                                };
-                            }
-
-                            // Audio screen sharing for electron only works for screen type devices.
-                            // i.e. when the user shares the whole desktop.
-                            // Note. The documentation specifies that chromeMediaSourceId should not be present
-                            // which, in the case a users has multiple monitors, leads to them being shared all
-                            // at once. However we tested with chromeMediaSourceId present and it seems to be
-                            // working properly.
-                            if (streamType === 'screen') {
-                                audioConstraints.mandatory = {
-                                    chromeMediaSource: 'desktop'
-                                };
-                            }
-                        }
-
-                        const constraints = {
-                            audio: audioConstraints,
+                        const videoConstraints = {
+                            audio: false,
                             video: {
                                 mandatory: {
                                     chromeMediaSource: 'desktop',
@@ -143,17 +183,35 @@ const ScreenObtainer = {
                             }
                         };
 
-                        // We have to use the old API on Electron to get a desktop stream.
-                        navigator.mediaDevices.getUserMedia(constraints)
-                            .then(stream => {
-                                this.setContentHint(stream);
-                                onSuccess({
-                                    stream,
-                                    sourceId: streamId,
-                                    sourceType: streamType
+                        Promise.all([
+                            self.getAudioStreamOnElectron(screenShareAudio),
+                            navigator.mediaDevices.getUserMedia(videoConstraints)
+                        ])
+                        .then(([ audioStream, videoStream ]) => {
+                            logger.info('combine audio and video source');
+                            const combinedStream = new MediaStream();
+
+                            videoStream.getVideoTracks().forEach(track => {
+                                combinedStream.addTrack(track);
+                            });
+
+                            if (audioStream) {
+                                audioStream.getAudioTracks().forEach(track => {
+                                    combinedStream.addTrack(track);
                                 });
-                            })
-                            .catch(err => onFailure(err));
+                            }
+
+                            self.setContentHint(combinedStream);
+                            onSuccess({
+                                stream: combinedStream,
+                                sourceId: streamId,
+                                sourceType: streamType
+                            });
+                        })
+                        .catch(err => {
+                            onFailure(err);
+                            logger.error(`get stream source failed with error ${err}`);
+                        });
                     } else {
                         // As noted in Chrome Desktop Capture API:
                         // If user didn't select any source (i.e. canceled the prompt)
